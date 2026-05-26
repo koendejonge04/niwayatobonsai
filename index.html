@@ -697,15 +697,30 @@
   <button class="footer-dot" onclick="go('beheer')" title="Beheermodus">•</button>
 </footer>
 
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
+
 <script>
+// ═══════════════════════════════════════
+// FIREBASE
+// ═══════════════════════════════════════
+firebase.initializeApp({
+  apiKey:            "AIzaSyDmxJ1923BWFUEXBcFSJJerKy1WsO_FaDA",
+  authDomain:        "niwayatobonsai.firebaseapp.com",
+  projectId:         "niwayatobonsai",
+  storageBucket:     "niwayatobonsai.firebasestorage.app",
+  messagingSenderId: "662889710409",
+  appId:             "1:662889710409:web:ccca2a40a34a8e17051098"
+});
+const db      = firebase.firestore();
+const storage = firebase.storage();
+
 // ═══════════════════════════════════════
 // CONSTANTS & STATE
 // ═══════════════════════════════════════
-const STORE   = 'niwayato_v1';
-const CSTORE  = 'niwayato_content_v1';
-const GSTORE  = 'niwayato_gallery_v1';
-const SESS    = 'niwayato_auth';
-const PASS    = 'niwayato2024';
+const SESS = 'niwayato_auth';
+const PASS = 'niwayato2024';
 
 const DEFAULT_CONTENT = {
   hero: {
@@ -728,19 +743,15 @@ const DEFAULT_CONTENT = {
   footer: '© 2024 Niwayato Bonsai — Persoonlijk Archief'
 };
 
-let trees         = JSON.parse(localStorage.getItem(STORE)  || '[]');
-let content       = JSON.parse(localStorage.getItem(CSTORE) || 'null') || structuredClone(DEFAULT_CONTENT);
-let gallery       = JSON.parse(localStorage.getItem(GSTORE) || '[]');
+let trees         = [];
+let content       = structuredClone(DEFAULT_CONTENT);
+let gallery       = [];
 let editId        = null;
-let stageFotos    = [];
-let stageGalFotos = [];
-let confirmCb     = null;
+let stageFotos    = []; // [{src: string, file: File|null}]
+let stageGalFotos = []; // [{src: string, file: File, label: string}]
 let toastTimer    = null;
 
-function persist()        { localStorage.setItem(STORE,  JSON.stringify(trees)); }
-function persistContent() { localStorage.setItem(CSTORE, JSON.stringify(content)); }
-function persistGallery() { localStorage.setItem(GSTORE, JSON.stringify(gallery)); }
-function authed()         { return sessionStorage.getItem(SESS) === '1'; }
+function authed() { return sessionStorage.getItem(SESS) === '1'; }
 
 function structuredClone(obj) {
   try { return window.structuredClone ? window.structuredClone(obj) : JSON.parse(JSON.stringify(obj)); }
@@ -982,8 +993,9 @@ function renderAdminList() {
 // ═══════════════════════════════════════
 function cancelEdit() {
   editId = null; stageFotos = [];
-  ['f-naam','f-japans','f-soort','f-leeftijd','f-herkomst','f-desc'].forEach(id => {
-    document.getElementById(id).value = '';
+  ['f-naam','f-soort','f-leeftijd','f-herkomst','f-desc'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
   });
   document.getElementById('f-stijl').value  = '';
   document.getElementById('photo-file').value = '';
@@ -997,7 +1009,7 @@ function startEdit(id) {
   const t = trees.find(x => x.id === id);
   if (!t) return;
   editId = id;
-  stageFotos = [...(t.fotos || [])];
+  stageFotos = (t.fotos || []).map(url => ({ src: url, file: null }));
   document.getElementById('f-naam').value     = t.naam || '';
   document.getElementById('f-soort').value    = t.soort || '';
   document.getElementById('f-leeftijd').value = t.leeftijd || '';
@@ -1012,31 +1024,60 @@ function startEdit(id) {
   document.getElementById('form-heading').scrollIntoView({behavior:'smooth'});
 }
 
-function saveTree() {
+async function saveTree() {
   const naam = document.getElementById('f-naam').value.trim();
   if (!naam) { toast('Voer een naam in.'); document.getElementById('f-naam').focus(); return; }
-  const data = {
-    naam,
-    soort:        document.getElementById('f-soort').value.trim(),
-    leeftijd:     parseInt(document.getElementById('f-leeftijd').value) || null,
-    stijl:        document.getElementById('f-stijl').value,
-    herkomst:     document.getElementById('f-herkomst').value.trim(),
-    beschrijving: document.getElementById('f-desc').value.trim(),
-    fotos:        stageFotos,
-    added:        new Date().toISOString().split('T')[0],
-  };
-  if (editId) {
-    const i = trees.findIndex(x => x.id === editId);
-    if (i !== -1) trees[i] = { ...trees[i], ...data };
-    toast('Boom bijgewerkt.');
-  } else {
-    data.id = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
-    trees.push(data);
-    toast('Boom toegevoegd aan de collectie.');
+
+  const btn = document.getElementById('btn-save');
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Bezig met opslaan…';
+
+  try {
+    const treeId = editId || (Date.now().toString(36) + Math.random().toString(36).slice(2,6));
+
+    const fotoUrls = [];
+    for (let i = 0; i < stageFotos.length; i++) {
+      const foto = stageFotos[i];
+      if (foto.file) {
+        const ref = storage.ref(`trees/${treeId}/${Date.now()}_${i}`);
+        await ref.put(foto.file);
+        fotoUrls.push(await ref.getDownloadURL());
+      } else {
+        fotoUrls.push(foto.src);
+      }
+    }
+
+    const data = {
+      naam,
+      soort:        document.getElementById('f-soort').value.trim(),
+      leeftijd:     parseInt(document.getElementById('f-leeftijd').value) || null,
+      stijl:        document.getElementById('f-stijl').value,
+      herkomst:     document.getElementById('f-herkomst').value.trim(),
+      beschrijving: document.getElementById('f-desc').value.trim(),
+      fotos:        fotoUrls,
+      added:        new Date().toISOString().split('T')[0],
+    };
+
+    await db.collection('trees').doc(treeId).set(data);
+
+    if (editId) {
+      const i = trees.findIndex(x => x.id === editId);
+      if (i !== -1) trees[i] = { id: treeId, ...data };
+      toast('Boom bijgewerkt.');
+    } else {
+      trees.push({ id: treeId, ...data });
+      toast('Boom toegevoegd aan de collectie.');
+    }
+    cancelEdit();
+    renderAdminList();
+  } catch(e) {
+    console.error('saveTree:', e);
+    toast('Fout bij opslaan. Probeer opnieuw.');
+    btn.textContent = origText;
+  } finally {
+    btn.disabled = false;
   }
-  persist();
-  cancelEdit();
-  renderAdminList();
 }
 
 // ═══════════════════════════════════════
@@ -1046,14 +1087,14 @@ function onFileChange(e) { loadFiles(Array.from(e.target.files)); }
 function loadFiles(files) {
   files.filter(f => f.type.startsWith('image/')).forEach(f => {
     const r = new FileReader();
-    r.onload = e => { stageFotos.push(e.target.result); renderPreviews(); };
+    r.onload = e => { stageFotos.push({ src: e.target.result, file: f }); renderPreviews(); };
     r.readAsDataURL(f);
   });
 }
 function renderPreviews() {
-  document.getElementById('photo-preview').innerHTML = stageFotos.map((src,i) => `
+  document.getElementById('photo-preview').innerHTML = stageFotos.map((foto,i) => `
     <div class="photo-tw">
-      <img src="${src}" alt="">
+      <img src="${foto.src}" alt="">
       <button onclick="removePhoto(${i})">×</button>
     </div>`).join('');
 }
@@ -1101,7 +1142,7 @@ function populateContentForm() {
   document.getElementById('ct-footer').value        = content.footer;
 }
 
-function saveContent() {
+async function saveContent() {
   content.filosofie.overline   = document.getElementById('ct-f-overline').value.trim() || DEFAULT_CONTENT.filosofie.overline;
   content.filosofie.titel      = document.getElementById('ct-f-titel').value || DEFAULT_CONTENT.filosofie.titel;
   content.filosofie.tekst      = document.getElementById('ct-f-tekst').value.trim() || DEFAULT_CONTENT.filosofie.tekst;
@@ -1118,7 +1159,13 @@ function saveContent() {
   content.hero.sub      = document.getElementById('ct-h-sub').value.trim() || DEFAULT_CONTENT.hero.sub;
   content.footer        = document.getElementById('ct-footer').value.trim() || DEFAULT_CONTENT.footer;
 
-  persistContent();
+  try {
+    await db.collection('config').doc('content').set(content);
+  } catch(e) {
+    console.error('saveContent:', e);
+    toast('Fout bij opslaan teksten.');
+    return;
+  }
 
   // Live doorvoeren
   renderHero();
@@ -1136,9 +1183,20 @@ function saveContent() {
 // DELETE
 // ═══════════════════════════════════════
 function askDelete(id) {
-  document.getElementById('confirm-ok').onclick = () => {
+  document.getElementById('confirm-ok').onclick = async () => {
+    try {
+      await db.collection('trees').doc(id).delete();
+      try {
+        const list = await storage.ref(`trees/${id}`).listAll();
+        await Promise.all(list.items.map(item => item.delete()));
+      } catch(e) {}
+    } catch(e) {
+      console.error('delete tree:', e);
+      toast('Fout bij verwijderen.');
+      closeConfirm();
+      return;
+    }
     trees = trees.filter(x => x.id !== id);
-    persist();
     if (editId === id) cancelEdit();
     renderAdminList();
     toast('Boom verwijderd.');
@@ -1196,7 +1254,7 @@ function onGalFileChange(e) { loadGalFiles(Array.from(e.target.files)); }
 function loadGalFiles(files) {
   files.filter(f => f.type.startsWith('image/')).forEach(f => {
     const r = new FileReader();
-    r.onload = e => { stageGalFotos.push({ src: e.target.result, label: '' }); renderGalStage(); };
+    r.onload = e => { stageGalFotos.push({ src: e.target.result, file: f, label: '' }); renderGalStage(); };
     r.readAsDataURL(f);
   });
 }
@@ -1216,17 +1274,33 @@ function renderGalStage() {
     </div>`).join('');
 }
 function removeGalStage(i) { stageGalFotos.splice(i, 1); renderGalStage(); }
-function saveGalStage() {
+async function saveGalStage() {
   if (!stageGalFotos.length) return;
-  stageGalFotos.forEach(p => {
-    gallery.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2,6), src: p.src, label: p.label.trim(), added: new Date().toISOString().split('T')[0] });
-  });
-  persistGallery();
-  stageGalFotos = [];
-  document.getElementById('gal-photo-file').value = '';
-  renderGalStage();
-  renderGalCurGrid();
-  toast(`${gallery.length > 1 ? 'Foto\'s' : 'Foto'} toegevoegd aan de galerij.`);
+  const btn = document.getElementById('gal-btn-save');
+  btn.disabled = true;
+  btn.textContent = 'Bezig met uploaden…';
+  try {
+    for (const p of stageGalFotos) {
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+      const ref = storage.ref(`gallery/${id}`);
+      await ref.put(p.file);
+      const url = await ref.getDownloadURL();
+      const item = { id, src: url, label: p.label.trim(), added: new Date().toISOString().split('T')[0] };
+      await db.collection('gallery').doc(id).set(item);
+      gallery.push(item);
+    }
+    stageGalFotos = [];
+    document.getElementById('gal-photo-file').value = '';
+    renderGalStage();
+    renderGalCurGrid();
+    toast("Foto's toegevoegd aan de galerij.");
+  } catch(e) {
+    console.error('saveGalStage:', e);
+    toast('Fout bij uploaden foto.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Foto's toevoegen aan galerij";
+  }
 }
 
 function renderGalCurGrid() {
@@ -1241,9 +1315,19 @@ function renderGalCurGrid() {
       <button class="gal-cur-del" onclick="deleteGalPhoto('${p.id}')" title="Verwijderen">×</button>
     </div>`).join('');
 }
-function deleteGalPhoto(id) {
+async function deleteGalPhoto(id) {
+  const photo = gallery.find(p => p.id === id);
+  try {
+    await db.collection('gallery').doc(id).delete();
+    if (photo) {
+      try { await storage.refFromURL(photo.src).delete(); } catch(e) {}
+    }
+  } catch(e) {
+    console.error('deleteGalPhoto:', e);
+    toast('Fout bij verwijderen foto.');
+    return;
+  }
   gallery = gallery.filter(p => p.id !== id);
-  persistGallery();
   renderGalCurGrid();
   toast('Foto verwijderd uit de galerij.');
 }
@@ -1275,8 +1359,21 @@ document.addEventListener('keydown', e => {
 // ═══════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════
-window.addEventListener('load', () => {
-  setTimeout(() => document.getElementById('loader').classList.add('out'), 1300);
+window.addEventListener('load', async () => {
+  try {
+    const [contentDoc, treesSnap, galSnap] = await Promise.all([
+      db.collection('config').doc('content').get(),
+      db.collection('trees').get(),
+      db.collection('gallery').get()
+    ]);
+    if (contentDoc.exists) content = contentDoc.data();
+    trees   = treesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    gallery = galSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch(e) {
+    console.error('Firebase load error:', e);
+    toast('Kon data niet laden. Controleer verbinding.');
+  }
+  setTimeout(() => document.getElementById('loader').classList.add('out'), 400);
   document.getElementById('nl-collectie').classList.add('active');
   renderHero();
   renderFilosofie();
