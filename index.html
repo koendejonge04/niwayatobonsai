@@ -94,7 +94,6 @@
     .card-body { padding: 1.2rem 1.2rem 1.5rem; }
     .card-tag { display: inline-block; font-size: .58rem; letter-spacing: .22em; text-transform: uppercase; font-weight: 600; color: var(--accent); border: 1px solid var(--licht); padding: .18rem .55rem; margin-bottom: .7rem; }
     .card-naam { font-family: var(--fd); font-weight: 700; font-size: 1.05rem; line-height: 1.2; margin-bottom: .25rem; }
-    .card-japans { font-size: .82rem; font-weight: 300; color: var(--accent); font-style: italic; margin-bottom: .7rem; }
     .card-meta { display: flex; gap: 1.2rem; border-top: 1px solid var(--licht); padding-top: .7rem; }
     .card-meta-item { display:flex; flex-direction:column; gap:.15rem; }
     .card-meta-label { font-size: .56rem; letter-spacing: .18em; text-transform: uppercase; color: var(--licht); font-weight: 600; }
@@ -123,7 +122,6 @@
     .modal-info { padding: 2.8rem 2.2rem; overflow-y:auto; }
     .modal-tag { display:inline-block; font-size:.62rem; letter-spacing:.22em; text-transform:uppercase; font-weight:600; color:var(--accent); border:1px solid var(--licht); padding:.22rem .7rem; margin-bottom:1.4rem; }
     .modal-naam { font-family: var(--fd); font-weight:800; font-size:clamp(1.5rem,3vw,2.1rem); line-height:1.1; margin-bottom:.4rem; }
-    .modal-japans { font-size:.95rem; font-weight:300; color:var(--accent); font-style:italic; margin-bottom:1.8rem; }
     .modal-igrid { display:grid; grid-template-columns:1fr 1fr; gap:1.1rem; margin-bottom:1.8rem; padding-bottom:1.8rem; border-bottom:1px solid var(--licht); }
     .modal-iitem label { display:block; font-size:.58rem; letter-spacing:.2em; text-transform:uppercase; color:var(--licht); font-weight:600; margin-bottom:.28rem; }
     .modal-iitem span { font-size:.88rem; font-weight:500; }
@@ -463,12 +461,8 @@
           <div class="form-box">
             <div class="form-box-title" id="form-heading">Boom Toevoegen</div>
             <div class="fg">
-              <label>Nederlandse naam *</label>
-              <input type="text" class="fi" id="f-naam" placeholder="bijv. Eeuwenoude Esdoorn">
-            </div>
-            <div class="fg">
-              <label>Japanse naam</label>
-              <input type="text" class="fi" id="f-japans" placeholder="bijv. 楓">
+              <label>Latijnse naam *</label>
+              <input type="text" class="fi" id="f-naam" placeholder="bijv. Acer palmatum">
             </div>
             <div class="fg-row">
               <div class="fg">
@@ -841,7 +835,6 @@ function mkCard(t) {
     <div class="card-body">
       ${t.stijl ? `<div class="card-tag">${esc(t.stijl)}</div>` : ''}
       <div class="card-naam">${esc(t.naam)}</div>
-      ${t.japanseNaam ? `<div class="card-japans">${esc(t.japanseNaam)}</div>` : ''}
       <div class="card-meta">
         ${t.soort    ? `<div class="card-meta-item"><div class="card-meta-label">Soort</div><div class="card-meta-val">${esc(t.soort)}</div></div>` : ''}
         ${t.leeftijd ? `<div class="card-meta-item"><div class="card-meta-label">Leeftijd</div><div class="card-meta-val">${t.leeftijd} jaar</div></div>` : ''}
@@ -883,7 +876,6 @@ function openModal(id) {
   infoEl.innerHTML = `
     ${t.stijl ? `<div class="modal-tag">${esc(t.stijl)}</div>` : ''}
     <h2 class="modal-naam">${esc(t.naam)}</h2>
-    ${t.japanseNaam ? `<div class="modal-japans">${esc(t.japanseNaam)}</div>` : ''}
     ${fields.length ? `<div class="modal-igrid">${fields.map(f =>
       `<div class="modal-iitem"><label>${f.l}</label><span>${esc(String(f.v))}</span></div>`
     ).join('')}</div>` : ''}
@@ -1007,7 +999,6 @@ function startEdit(id) {
   editId = id;
   stageFotos = [...(t.fotos || [])];
   document.getElementById('f-naam').value     = t.naam || '';
-  document.getElementById('f-japans').value   = t.japanseNaam || '';
   document.getElementById('f-soort').value    = t.soort || '';
   document.getElementById('f-leeftijd').value = t.leeftijd || '';
   document.getElementById('f-stijl').value    = t.stijl || '';
@@ -1026,7 +1017,6 @@ function saveTree() {
   if (!naam) { toast('Voer een naam in.'); document.getElementById('f-naam').focus(); return; }
   const data = {
     naam,
-    japanseNaam:  document.getElementById('f-japans').value.trim(),
     soort:        document.getElementById('f-soort').value.trim(),
     leeftijd:     parseInt(document.getElementById('f-leeftijd').value) || null,
     stijl:        document.getElementById('f-stijl').value,
