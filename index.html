@@ -697,15 +697,32 @@
   <button class="footer-dot" onclick="go('beheer')" title="Beheermodus">•</button>
 </footer>
 
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script>
+// ═══════════════════════════════════════
+// FIREBASE CONFIG & INIT
+// ═══════════════════════════════════════
+const firebaseConfig = {
+  apiKey: "AIzaSyDmxJ1923BWFUEXBcFSJJerKy1WsO_FaDA",
+  authDomain: "niwayatobonsai.firebaseapp.com",
+  databaseURL: "https://niwayatobonsai-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "niwayatobonsai",
+  storageBucket: "niwayatobonsai.firebasestorage.app",
+  messagingSenderId: "662889710409",
+  appId: "1:662889710409:web:ccca2a40a34a8e17051098",
+  measurementId: "G-4YRMYT3XY4"
+};
+firebase.initializeApp(firebaseConfig);
+const db   = firebase.database();
+const auth = firebase.auth();
+
 // ═══════════════════════════════════════
 // CONSTANTS & STATE
 // ═══════════════════════════════════════
-const STORE   = 'niwayato_v1';
-const CSTORE  = 'niwayato_content_v1';
-const GSTORE  = 'niwayato_gallery_v1';
-const SESS    = 'niwayato_auth';
-const PASS    = 'niwayato2024';
+const ADMIN_EMAIL = 'koendejonge04@gmail.com';
+let _authed = false;
 
 const DEFAULT_CONTENT = {
   hero: {
@@ -728,19 +745,33 @@ const DEFAULT_CONTENT = {
   footer: '© 2024 Niwayato Bonsai — Persoonlijk Archief'
 };
 
-let trees         = JSON.parse(localStorage.getItem(STORE)  || '[]');
-let content       = JSON.parse(localStorage.getItem(CSTORE) || 'null') || structuredClone(DEFAULT_CONTENT);
-let gallery       = JSON.parse(localStorage.getItem(GSTORE) || '[]');
+let trees         = [];
+let content       = structuredClone(DEFAULT_CONTENT);
+let gallery       = [];
 let editId        = null;
 let stageFotos    = [];
 let stageGalFotos = [];
 let confirmCb     = null;
 let toastTimer    = null;
+let _dataReady    = false;
 
-function persist()        { localStorage.setItem(STORE,  JSON.stringify(trees)); }
-function persistContent() { localStorage.setItem(CSTORE, JSON.stringify(content)); }
-function persistGallery() { localStorage.setItem(GSTORE, JSON.stringify(gallery)); }
-function authed()         { return sessionStorage.getItem(SESS) === '1'; }
+// ═══════════════════════════════════════
+// FIREBASE PERSIST
+// ═══════════════════════════════════════
+function persist() {
+  const obj = {};
+  trees.forEach(t => { obj[t.id] = t; });
+  db.ref('niwayato/trees').set(trees.length ? obj : null);
+}
+function persistContent() {
+  db.ref('niwayato/content').set(content);
+}
+function persistGallery() {
+  const obj = {};
+  gallery.forEach(p => { obj[p.id] = p; });
+  db.ref('niwayato/gallery').set(gallery.length ? obj : null);
+}
+function authed() { return _authed; }
 
 function structuredClone(obj) {
   try { return window.structuredClone ? window.structuredClone(obj) : JSON.parse(JSON.stringify(obj)); }
@@ -912,17 +943,20 @@ function renderBeheer() {
   }
 }
 function tryLogin() {
-  if (document.getElementById('pw-input').value === PASS) {
-    sessionStorage.setItem(SESS, '1');
-    showAdmin();
-  } else {
-    document.getElementById('login-err').classList.add('show');
-    document.getElementById('pw-input').value = '';
-    document.getElementById('pw-input').focus();
-  }
+  const pw = document.getElementById('pw-input').value;
+  document.getElementById('login-err').classList.remove('show');
+  auth.signInWithEmailAndPassword(ADMIN_EMAIL, pw)
+    .then(() => {
+      document.getElementById('pw-input').value = '';
+    })
+    .catch(() => {
+      document.getElementById('login-err').classList.add('show');
+      document.getElementById('pw-input').value = '';
+      document.getElementById('pw-input').focus();
+    });
 }
 function logout() {
-  sessionStorage.removeItem(SESS);
+  auth.signOut();
   go('collectie');
 }
 function showAdmin() {
@@ -982,7 +1016,7 @@ function renderAdminList() {
 // ═══════════════════════════════════════
 function cancelEdit() {
   editId = null; stageFotos = [];
-  ['f-naam','f-japans','f-soort','f-leeftijd','f-herkomst','f-desc'].forEach(id => {
+  ['f-naam','f-soort','f-leeftijd','f-herkomst','f-desc'].forEach(id => {
     document.getElementById(id).value = '';
   });
   document.getElementById('f-stijl').value  = '';
@@ -1026,17 +1060,17 @@ function saveTree() {
     added:        new Date().toISOString().split('T')[0],
   };
   if (editId) {
-    const i = trees.findIndex(x => x.id === editId);
-    if (i !== -1) trees[i] = { ...trees[i], ...data };
+    const existing = trees.find(x => x.id === editId);
+    const merged = existing ? { ...existing, ...data } : { ...data, id: editId };
+    db.ref('niwayato/trees/' + editId).set(merged);
     toast('Boom bijgewerkt.');
   } else {
-    data.id = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
-    trees.push(data);
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+    data.id = id;
+    db.ref('niwayato/trees/' + id).set(data);
     toast('Boom toegevoegd aan de collectie.');
   }
-  persist();
   cancelEdit();
-  renderAdminList();
 }
 
 // ═══════════════════════════════════════
@@ -1137,10 +1171,8 @@ function saveContent() {
 // ═══════════════════════════════════════
 function askDelete(id) {
   document.getElementById('confirm-ok').onclick = () => {
-    trees = trees.filter(x => x.id !== id);
-    persist();
+    db.ref('niwayato/trees/' + id).remove();
     if (editId === id) cancelEdit();
-    renderAdminList();
     toast('Boom verwijderd.');
     closeConfirm();
   };
@@ -1218,15 +1250,18 @@ function renderGalStage() {
 function removeGalStage(i) { stageGalFotos.splice(i, 1); renderGalStage(); }
 function saveGalStage() {
   if (!stageGalFotos.length) return;
+  const count = stageGalFotos.length;
   stageGalFotos.forEach(p => {
-    gallery.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2,6), src: p.src, label: p.label.trim(), added: new Date().toISOString().split('T')[0] });
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+    db.ref('niwayato/gallery/' + id).set({
+      id, src: p.src, label: p.label.trim(),
+      added: new Date().toISOString().split('T')[0]
+    });
   });
-  persistGallery();
   stageGalFotos = [];
   document.getElementById('gal-photo-file').value = '';
   renderGalStage();
-  renderGalCurGrid();
-  toast(`${gallery.length > 1 ? 'Foto\'s' : 'Foto'} toegevoegd aan de galerij.`);
+  toast(`${count > 1 ? "Foto's" : 'Foto'} toegevoegd aan de galerij.`);
 }
 
 function renderGalCurGrid() {
@@ -1242,9 +1277,7 @@ function renderGalCurGrid() {
     </div>`).join('');
 }
 function deleteGalPhoto(id) {
-  gallery = gallery.filter(p => p.id !== id);
-  persistGallery();
-  renderGalCurGrid();
+  db.ref('niwayato/gallery/' + id).remove();
   toast('Foto verwijderd uit de galerij.');
 }
 
@@ -1273,15 +1306,65 @@ document.addEventListener('keydown', e => {
 });
 
 // ═══════════════════════════════════════
-// INIT
+// INIT — Firebase real-time listeners
 // ═══════════════════════════════════════
+// Auth state bewaken
+auth.onAuthStateChanged(user => {
+  _authed = !!user;
+  if (_dataReady) {
+    if (user) {
+      showAdmin();
+    } else {
+      document.getElementById('login-overlay').style.display = 'flex';
+      document.getElementById('admin-panel').style.display   = 'none';
+    }
+  }
+});
+
 window.addEventListener('load', () => {
-  setTimeout(() => document.getElementById('loader').classList.add('out'), 1300);
-  document.getElementById('nl-collectie').classList.add('active');
-  renderHero();
-  renderFilosofie();
-  renderFooter();
-  renderCollectie();
+  let pending = 3;
+
+  function checkReady() {
+    pending--;
+    if (pending > 0) return;
+    _dataReady = true;
+    setTimeout(() => document.getElementById('loader').classList.add('out'), 600);
+    document.getElementById('nl-collectie').classList.add('active');
+    renderHero();
+    renderFilosofie();
+    renderFooter();
+    renderCollectie();
+  }
+
+  // Bomen
+  db.ref('niwayato/trees').on('value', snap => {
+    const val = snap.val();
+    trees = val ? Object.values(val).map(t => ({
+      ...t,
+      fotos: t.fotos ? (Array.isArray(t.fotos) ? t.fotos : Object.values(t.fotos)) : []
+    })).sort((a, b) => new Date(a.added || 0) - new Date(b.added || 0)) : [];
+    if (!_dataReady) { checkReady(); return; }
+    renderCollectie();
+    if (authed()) renderAdminList();
+  });
+
+  // Inhoud / teksten
+  db.ref('niwayato/content').on('value', snap => {
+    const val = snap.val();
+    content = (val && val.filosofie?.waarden) ? val : structuredClone(DEFAULT_CONTENT);
+    if (!_dataReady) { checkReady(); return; }
+    renderHero(); renderFilosofie(); renderFooter();
+    if (authed()) populateContentForm();
+  });
+
+  // Galerij
+  db.ref('niwayato/gallery').on('value', snap => {
+    const val = snap.val();
+    gallery = val ? Object.values(val).sort((a, b) => new Date(a.added || 0) - new Date(b.added || 0)) : [];
+    if (!_dataReady) { checkReady(); return; }
+    if (document.getElementById('page-galerij').classList.contains('active')) renderGalerij();
+    if (authed()) renderGalCurGrid();
+  });
 });
 </script>
 </body>
